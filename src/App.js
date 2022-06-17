@@ -16,7 +16,7 @@ import '@fortawesome/fontawesome-free/js/solid';
 import '@fortawesome/fontawesome-free/js/regular';
 import '@fortawesome/fontawesome-free/js/brands';
 
-let web3, contract;
+let web3, nftContract, stakingContract;
 
 class Container extends React.Component {
 
@@ -110,7 +110,7 @@ class Container extends React.Component {
 
     if(this.state.isPresaleStarted) {
       if(this.Whitelist.isInWhitelist(this.state.address)) {
-        contract.methods.mintPresale(amount, this.Whitelist.getMerkleProof(this.state.address)).send({
+        nftContract.methods.mintPresale(amount, this.Whitelist.getMerkleProof(this.state.address)).send({
           from: this.state.address,
           to: contractInfo.address,
           value: BigNumber.from(web3.utils.toWei(this.state.mintPrice, 'ether')).mul(BigNumber.from(amount)) 
@@ -128,7 +128,7 @@ class Container extends React.Component {
       }
     }
     else if(this.state.isPublicsaleStarted) {
-      contract.methods.mint(amount).send({
+      nftContract.methods.mint(amount).send({
         from: this.state.address,
         to: contractInfo.address,
         value: BigNumber.from(web3.utils.toWei(this.state.mintPrice, 'ether')).mul(BigNumber.from(amount)) 
@@ -146,35 +146,129 @@ class Container extends React.Component {
     }
   }
 
+  approveAll = async () => {
+    nftContract.methods.setApprovalForAll(contractInfo.Staking.address, true).send({
+      from: this.state.address
+    }).then(() => {
+      this.displayNotification('success', 'Success!')
+      eventBus.dispatch('approved', {})
+      eventBus.dispatch('updateState', {})
+    }).catch(() => {
+      this.displayNotification('error', 'Transaction error.')
+    })
+  }
+
+  stakeNFT = async (tokenId) => {
+    stakingContract.methods.Deposit(tokenId).send({
+      from: this.state.address,
+    }).then(() => {
+      this.displayNotification('success', 'You staked a NFT successfully.')
+      eventBus.dispatch('updateState', {})
+      this.fetchNFTs()
+    }).catch(() => {
+      this.displayNotification('error', 'Transaction error.')
+    })
+  }
+
+  unstakeNFT = async (tokenId) => {
+    stakingContract.methods.WithdrawNFT(tokenId).send({
+      from: this.state.address,
+    }).then(() => {
+      this.displayNotification('success', 'You unstaked a NFT successfully.')
+      eventBus.dispatch('updateState', {})
+      this.fetchNFTs()
+    }).catch(() => {
+      this.displayNotification('error', 'Transaction error.')
+    })
+  }
+
+  unstakeAll = async () => {
+    stakingContract.methods.WithdrawAll().send({
+      from: this.state.address,
+    }).then(() => {
+      this.displayNotification('success', 'You unstaked all NFTs successfully.')
+      eventBus.dispatch('updateState', {})
+      this.fetchNFTs()
+    }).catch(() => {
+      this.displayNotification('error', 'Transaction error.')
+    })
+  }
+
+  claimReward = async () => {
+    stakingContract.methods.WithdrawDividents().send({
+      from: this.state.address,
+    }).then(() => {
+      this.displayNotification('success', 'You withdrawed reward tokens successfully.')
+      eventBus.dispatch('updateState', {})
+    }).catch(() => {
+      this.displayNotification('error', 'Transaction error.')
+    })
+  }
+
   fetchNFTs = async () => {
-    let nfts = []
-    let balance = await contract.methods.balanceOf(this.state.address).call()
+    let nfts = [], stakedNFTs = []
+    let balance = await nftContract.methods.balanceOf(this.state.address).call()
+    let stakedBalance = await stakingContract.methods.getLengthOfStakedNFTs(this.state.address).call()
+
+    for(let i = 0; i < stakedBalance; i ++) {
+      let tokenId = await stakingContract.methods.getStakedNFTByIndex(this.state.address, i).call()
+      stakedNFTs.push({
+        id: tokenId,
+        image: ""
+      })
+    }
+
     for(let i = 0; i < balance; i ++) {
-      let tokenId = await contract.methods.tokenOfOwnerByIndex(this.state.address, i).call()
-      let tokenURI = await contract.methods.tokenURI(tokenId).call()
+      let tokenId = await nftContract.methods.tokenOfOwnerByIndex(this.state.address, i).call()
+      nfts.push({
+        id: tokenId,
+        image: ""
+      })
+    }
+
+    // eventBus.dispatch('imageUpdated', {
+    //   nfts,
+    //   stakedNFTs
+    // })
+
+    for(let i = 0; i < stakedBalance; i ++) {
+      let tokenId = stakedNFTs[i].id
+      let tokenURI = await nftContract.methods.tokenURI(tokenId).call()
       let index = tokenURI.indexOf(`${tokenId}.json`)
       tokenURI = tokenURI.slice(0, index) + `${parseInt(tokenId) + 1}.json`
 
       let data = await fetch(tokenURI)
       let json = await data.json()
       let imageUrl = json.image
-      nfts.push({
-        id: tokenId,
-        image: imageUrl
-      })
+      stakedNFTs[i].image = imageUrl
+    }
+
+    for(let i = 0; i < balance; i ++) {
+      let tokenId = nfts[i].id
+      let tokenURI = await nftContract.methods.tokenURI(tokenId).call()
+      let index = tokenURI.indexOf(`${tokenId}.json`)
+      tokenURI = tokenURI.slice(0, index) + `${parseInt(tokenId) + 1}.json`
+
+      let data = await fetch(tokenURI)
+      let json = await data.json()
+      let imageUrl = json.image
+      nfts[i].image = imageUrl
     }
 
     eventBus.dispatch('imageUpdated', {
-      nfts
+      nfts,
+      stakedNFTs
     })
   }
 
   updateState = async () => {
-    let isPresaleStarted = await contract.methods.presaleStarted().call()
-    let isPublicsaleStarted = await contract.methods.publicSaleStarted().call()
-    let totalSupply = await contract.methods.MAX_TOKENS().call()
-    let currentSupply = await contract.methods.totalSupply().call()
+    let isPresaleStarted = await nftContract.methods.presaleStarted().call()
+    let isPublicsaleStarted = await nftContract.methods.publicSaleStarted().call()
+    let totalSupply = await nftContract.methods.MAX_TOKENS().call()
+    let currentSupply = await nftContract.methods.totalSupply().call()
     let isInWhitelist = this.Whitelist.isInWhitelist(this.state.address)
+    let reward = await stakingContract.methods.getDividents(this.state.address).call()
+    let stakedNFTAmount = await stakingContract.methods.getLengthOfStakedNFTs(this.state.address).call()
 
     this.setState({
       ...this.state,
@@ -187,7 +281,9 @@ class Container extends React.Component {
       isPublicsaleStarted,
       totalSupply,
       currentSupply,
-      isInWhitelist
+      isInWhitelist,
+      stakedNFTAmount,
+      reward: parseFloat(web3.utils.fromWei(reward, 'ether')).toFixed(2)
     })
   }
 
@@ -211,7 +307,8 @@ class Container extends React.Component {
 
     if(window.ethereum) {
       web3 = new Web3(window.ethereum)
-      contract = new web3.eth.Contract(contractInfo.abi, contractInfo.address)
+      nftContract = new web3.eth.Contract(contractInfo.NFT.abi, contractInfo.NFT.address)
+      stakingContract = new web3.eth.Contract(contractInfo.Staking.abi, contractInfo.Staking.address)
 
       this.scanConnectedWallet()
     }
@@ -219,8 +316,23 @@ class Container extends React.Component {
     eventBus.on('walletConnection', () => {
       this.connectWallet()
     })
+    eventBus.on('approveAll', () => {
+      this.approveAll()
+    })
     eventBus.on('mintNFT', (e) => {
       this.mintNFT(e.amount)
+    })
+    eventBus.on('stakeNFT', (e) => {
+      this.stakeNFT(e.tokenId)
+    })
+    eventBus.on('unstakeNFT', (e) => {
+      this.unstakeNFT(e.tokenId)
+    })
+    eventBus.on('unstakeAll', () => {
+      this.unstakeNFT()
+    })
+    eventBus.on('claimReward', () => {
+      this.claimReward()
     })
     eventBus.on('updateState', () => {
       this.updateState()
@@ -239,15 +351,14 @@ class Container extends React.Component {
     }
 
     return () => {
-      eventBus.remove('walletConnection', () => {
-        this.connectWallet()
-      })
-      eventBus.remove('mintNFT', (e) => {
-        this.mintNFT(e.amount)
-      })
-      eventBus.remove('updateState', () => {
-        this.updateState()
-      })
+      eventBus.remove('walletConnection', () => {})
+      eventBus.on('approveAll', () => {})
+      eventBus.remove('mintNFT', () => {})
+      eventBus.on('stakeNFT', () => {})
+      eventBus.on('unstakeNFT', () => {})
+      eventBus.on('unstakeAll', () => {})
+      eventBus.on('claimReward', () => {})
+      eventBus.remove('updateState', () => {})
     }
   }
 
