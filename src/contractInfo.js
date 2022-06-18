@@ -875,7 +875,7 @@ const contractInfo = {
 		]
 	},
 	Staking: {
-		address: "0x99F338ab42D70488e8969376A3AF5cDc07Fb0beB",
+		address: "0x08264b53F18a6BD963283Bf60b45227582535d91",
 		abi: [
 			{
 			  "inputs": [
